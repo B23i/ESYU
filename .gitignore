@@ -13,4 +13,12 @@
 .externalNativeBuild
 .cxx
 local.properties
+build.gradle.kts
+settings.gradle.kts
+/gradle
+gradlew
+gradlew.bat
+gradle.properties
+.idea
+.kotline/errors
 
