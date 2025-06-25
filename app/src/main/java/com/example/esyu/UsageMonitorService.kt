@@ -16,8 +16,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +27,7 @@ import java.util.concurrent.TimeUnit
 
 const val SERVICE_CHANNEL_ID = "usage_monitor_service_channel"
 const val SERVICE_NOTIFICATION_ID = 1002
-const val CHECK_INTERVAL_MS = 1 * 1000L
+const val CHECK_INTERVAL_MS = 5 * 1000L
 
 class UsageMonitorService : Service() {
 
@@ -98,7 +96,7 @@ class UsageMonitorService : Service() {
                     val usedMinutesInHour = TimeUnit.MILLISECONDS.toMinutes(durationMs).toInt()
 
                     if (hourlyLimitMinutes != null && usedMinutesInHour > hourlyLimitMinutes) {
-                        sendUsageLimitNotification(applicationContext, name, usedMinutesInHour)
+                        sendUsageLimitNotification(applicationContext, pkg, name, usedMinutesInHour.toString())
                     }
 
                     val dailyKey = intPreferencesKey(pkg)
@@ -108,7 +106,7 @@ class UsageMonitorService : Service() {
                         val totalUsageTodayMs = getTotalUsageForPackageToday(applicationContext, pkg)
                         val totalUsedMinutesToday = TimeUnit.MILLISECONDS.toMinutes(totalUsageTodayMs).toInt()
                         if (totalUsedMinutesToday > dailyLimitMinutes) {
-                            sendUsageLimitNotification(applicationContext, name, totalUsedMinutesToday)
+                            sendUsageLimitNotification(applicationContext, pkg, name, totalUsedMinutesToday.toString())
                         }
                     }
                 }

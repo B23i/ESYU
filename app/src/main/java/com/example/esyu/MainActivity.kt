@@ -57,32 +57,22 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import android.graphics.drawable.Drawable
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
-import kotlin.compareTo
-import kotlin.hashCode
-import kotlin.inc
-import kotlin.or
-import kotlin.text.compareTo
-
-
-// YAPILACAKLAR:
-// 1. BİLDİRİM GÖNDERİYOR OPTİMİZE ETMEK GEREKİR. 1 SANİYEDE BİR KONTROL EDİYOR!
-// 2. BİLDİRİM GENLİŞTİRME ŞUANLIK ÖNCELİK DEĞİL
 
 const val USAGE_CHANNEL_ID = "usage_limit_channel"
 const val USAGE_NOTIFICATION_ID = 1001
 
 class MainActivity : ComponentActivity() {
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Start the foreground service in a safe way to avoid multiple restarts
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(this, Intent(this, UsageMonitorService::class.java))
-        } else {
-            startService(Intent(this, UsageMonitorService::class.java))
-        }
+        ContextCompat.startForegroundService(this, Intent(this, UsageMonitorService::class.java))
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             val customColors = darkColorScheme(
@@ -128,7 +118,12 @@ fun createUsageNotificationChannel(context: Context) {
     }
 }
 
-fun sendUsageLimitNotification(context: Context, appName: String, minutesUsed: Int) {
+fun sendUsageLimitNotification(
+    context: Context,
+    pkg: String,
+    appName: String,
+    minutesUsed: String
+) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val permission = ContextCompat.checkSelfPermission(
             context,
@@ -137,35 +132,46 @@ fun sendUsageLimitNotification(context: Context, appName: String, minutesUsed: I
         if (permission != PackageManager.PERMISSION_GRANTED) return
     }
 
-    val pendingIntent: PendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+    val pendingIntent: PendingIntent =
         PendingIntent.getActivity(
             context,
             context.packageName.hashCode(),
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-    } else {
-        PendingIntent.getActivity(
-            context,
-            context.packageName.hashCode(),
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT
-        )
-    }
 
     val builder = NotificationCompat.Builder(context, USAGE_CHANNEL_ID)
-        .setSmallIcon(R.mipmap.ic_launcher)
-        .setContentTitle("Kullanım Sınırı Aşıldı")
-        .setContentText("$appName uygulaması için ${minutesUsed}dk kullanım sınırını aştınız.")
+        .setSmallIcon(R.drawable.ic_launcher)
+        .setContentTitle("⏰ $appName Sınırı Aşıldı")
+        .setContentText("$minutesUsed dakika kullanım sınırını aştınız.")
+        .setStyle(
+            NotificationCompat.BigTextStyle().bigText(
+                "$appName uygulamasını $minutesUsed dakika boyunca kullandınız.\n" +
+                        "Belirlediğiniz sınırı aştınız. Bildirimi Kapatmak için İlgili Uygulamanın Detay Sayfasından Sınırı Kaldırın."
+            )
+        )
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(pendingIntent)
-        .setAutoCancel(true)
+        .setAutoCancel(true)   // ⬅️ Artık tek aksiyon bu
 
-    with(NotificationManagerCompat.from(context)) {
-        notify(USAGE_NOTIFICATION_ID + appName.hashCode(), builder.build())
+    NotificationManagerCompat.from(context)
+        .notify(USAGE_NOTIFICATION_ID + appName.hashCode(), builder.build())
+}
+
+// 2️⃣ Limit kaydetme – “bildirim bastırma” satırları silindi
+@RequiresApi(Build.VERSION_CODES.O)
+suspend fun saveLimit(
+    context: Context,
+    packageName: String,
+    limitMinutes: Int
+) {
+    val limitKey = intPreferencesKey(packageName)
+    context.dataStore.edit { prefs ->
+        prefs[limitKey] = limitMinutes
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun AppNavigator() {
     val navController = rememberNavController()
@@ -216,49 +222,74 @@ fun HomeScreen(navController: NavHostController) {
     var usageStats by remember { mutableStateOf<List<Triple<String, String, Long>>>(emptyList()) }
     var refreshTrigger by remember { mutableStateOf(0) }
 
-    LaunchedEffect(key1 = refreshTrigger, key2 = context) {
+    LaunchedEffect(Unit) {
         createUsageNotificationChannel(context)
-        usageStats = getUsagesForDay(context)
-        Log.d("HomeScreen", "Usage stats loaded: ${usageStats.size} items")
+        while (true) {
+            usageStats = getUsagesForDay(context)
+            kotlinx.coroutines.delay(50_000)
+        }
     }
+
+    val totalUsageMs = usageStats.sumOf { it.third }
+    val averageUsageMs = if (usageStats.isNotEmpty()) totalUsageMs / usageStats.size else 0L
+
+    val totalUsageText = formatMillisecondsToReadableTime(totalUsageMs)
+    val averageUsageText = formatMillisecondsToReadableTime(averageUsageMs)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(WindowInsets.systemBars.asPaddingValues())
             .padding(horizontal = 16.dp)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text(
             text = "Uygulama Kullanım Süreleri",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.onBackground
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Text(
+                text = "Toplam Kullanım: $totalUsageText",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Ortalama Uygulama Süresi: $averageUsageText",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+            )
+        }
+
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        /*Button(
             onClick = { refreshTrigger++ },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
             Text("Verileri Yenile", color = MaterialTheme.colorScheme.onPrimary)
-        }
+        }*/
 
-        Spacer(modifier = Modifier.height(16.dp))
+        //Spacer(modifier = Modifier.height(16.dp))
 
-        if (usageStats.isEmpty() && refreshTrigger > 0) {
+        if (usageStats.isEmpty()) {
+            val message = if (refreshTrigger == 0) "Kullanım verileri yükleniyor..." else "Görüntülenecek uygulama verisi bulunamadı."
             Text(
-                "Görüntülenecek uygulama verisi bulunamadı.",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(vertical = 16.dp)
-            )
-        } else if (usageStats.isEmpty() && refreshTrigger == 0) {
-            Text(
-                "Kullanım verileri yükleniyor...",
+                text = message,
                 fontSize = 16.sp,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(vertical = 16.dp)
@@ -270,8 +301,9 @@ fun HomeScreen(navController: NavHostController) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
-                    .clickable { navController.navigate("detail/${packageName}") },
+                    .clickable { navController.navigate("detail/$packageName") },
                 shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Row(
@@ -295,13 +327,18 @@ fun HomeScreen(navController: NavHostController) {
                         Text(
                             text = "Bugün: ${formatMillisecondsToReadableTime(timeMs)}",
                             fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
                     }
                 }
             }
+        }
+        Column {
+        Text("Uygulama kullanım süreleri, cihazınızın kullanım istatistiklerine dayanmaktadır. \n" +
+            "1 dakikadan az süreler dikkate alınmaz. \n" + "Uygulamaların Üzerine tıklayarak detaylarına ulaşabilirsiniz.\n" + "Bu Uygulama Muhammed Ali Kandemir ve Bilai İzzettin Tarafından geliştirilmiştir. Tüm hakları saklıdır.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.padding(16.dp))
         }
     }
 }
@@ -325,15 +362,26 @@ fun OtherAppIcon(packageName: String, modifier: Modifier = Modifier) {
     }
 
     iconBitmap?.let {
-        Image(bitmap = it, contentDescription = "App Icon", modifier = modifier)
+        Box(
+            modifier = modifier
+                .size(54.dp) // Slightly larger than before
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF121212)), // Dark background
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                bitmap = it,
+                contentDescription = "App Icon",
+                modifier = Modifier.size(34.dp) // Balanced icon size
+            )
+        }
     }
 }
 
 fun getUsagesForDay(context: Context): List<Triple<String, String, Long>> {
-    val usageStatsManager =
-        context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+    val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
 
-    // Bugünün 00:00 zamanı
+    // Start of today's time (00:00)
     val calendar = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0)
         set(Calendar.MINUTE, 0)
@@ -357,10 +405,10 @@ fun getUsagesForDay(context: Context): List<Triple<String, String, Long>> {
             UsageEvents.Event.MOVE_TO_FOREGROUND -> {
                 foregroundTimes[packageName] = event.timeStamp
             }
-
             UsageEvents.Event.MOVE_TO_BACKGROUND -> {
                 val start = foregroundTimes[packageName]
-                if (start != null) {
+                // Only count usages that both started and ended today
+                if (start != null && start >= startTime && event.timeStamp <= endTime) {
                     val duration = event.timeStamp - start
                     usageMap[packageName] = usageMap.getOrDefault(packageName, 0L) + duration
                     foregroundTimes.remove(packageName)
@@ -456,21 +504,18 @@ fun getAppNameFromPackage(context: Context, packageName: String): String {
         packageName
     }
 }
+
 fun formatMillisecondsToReadableTime(milliseconds: Long): String {
-    val totalSeconds = milliseconds / 1000
-    val hours = totalSeconds / 3600
-    val minutes = (totalSeconds % 3600) / 60
-    return "${hours}saat ${minutes}dk"
+    val totalMinutes = milliseconds / 60000
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return buildString {
+        if (hours > 0) append("${hours}saat ")
+        append("${minutes}dk")
+    }.trim()
 }
 
 val Context.dataStore by preferencesDataStore(name = "app_limits")
-
-suspend fun saveLimit(context: Context, packageName: String, limitMinutes: Int) {
-    val key = intPreferencesKey(packageName)
-    context.dataStore.edit { preferences ->
-        preferences[key] = limitMinutes
-    }
-}
 
 fun getLimit(context: Context, packageName: String): Flow<Int?> {
     val key = intPreferencesKey(packageName)
@@ -479,6 +524,7 @@ fun getLimit(context: Context, packageName: String): Flow<Int?> {
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun AppDetailScreen(packageName: String, navController: NavHostController) {
     val context = LocalContext.current
@@ -501,7 +547,29 @@ fun AppDetailScreen(packageName: String, navController: NavHostController) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         val appName = getAppNameFromPackage(context, packageName)
-        Text("$appName Detayları", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+        // Top section: App icon, title, and today's usage
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            OtherAppIcon(packageName = packageName, modifier = Modifier.size(48.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "$appName Detayları",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                val todayUsageMs = getUsagesForDay(context).firstOrNull { it.first == packageName }?.third ?: 0L
+                Text(
+                    text = "Bugün: ${formatMillisecondsToReadableTime(todayUsageMs)}",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -629,45 +697,71 @@ fun WeeklyUsageList(packageName: String, navController: NavController) {
     val context = LocalContext.current
     val usageList = remember { mutableStateListOf<Pair<String, Int>>() }
 
-    var message by remember { mutableStateOf("") }
-    var desiredMinutes by remember { mutableStateOf("") }
-
-    // Kayıtlı limit varsa başta yükle
     LaunchedEffect(Unit) {
         val weeklyData = getWeeklyUsageStats(context, packageName)
         usageList.clear()
         usageList.addAll(weeklyData)
     }
 
+    val maxMinutes = usageList.maxOfOrNull { it.second }?.takeIf { it > 0 } ?: 1
+
     Column(modifier = Modifier.padding(16.dp)) {
         Text(
-            "Uygulama: ${getAppName(context, packageName)}",
-            style = MaterialTheme.typography.titleMedium
+            text = "Haftalık Kullanım Grafiği",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
         )
-        Spacer(modifier = Modifier.height(12.dp))
 
-        usageList.forEach { (day, minutes) ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp)
-            ) {
-                Text(day, modifier = Modifier.width(40.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-                Box(
-                    modifier = Modifier
-                        .height(20.dp)
-                        .fillMaxWidth((minutes / 120f).coerceAtMost(1f))
-                        .background(Color(0xFF3F51B5), RoundedCornerShape(10.dp))
-                )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            usageList.forEach { (day, minutes) ->
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    Text(
+                        text = "$minutes dk",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
 
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "$minutes dk", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .width(20.dp)
+                            .height((minutes * 1.5f).dp.coerceAtMost(140.dp))
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    )
+                                )
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = day,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
