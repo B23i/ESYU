@@ -54,16 +54,16 @@ EYSU, Android'in `UsageStatsManager` API’sini kullanarak uygulamaların ekran 
 
 ---
 
-### 🔔 Bildirim Gösterimi
+### 📊 Detay Sayfası
 <p align="center">
-  <img src="assets/screenshots/bildirim.png" alt="Bildirim Ekranı" width="300"/>
+  <img src="assets/screenshots/detayS.png" alt="Detay Sayfası" width="300"/>
 </p>
 
 ---
 
-### 📊 Detay Sayfası
+### 🔔 Bildirim Gösterimi
 <p align="center">
-  <img src="assets/screenshots/detayS.png" alt="Detay Sayfası" width="300"/>
+  <img src="assets/screenshots/bildirim.png" alt="Bildirim Ekranı" width="300"/>
 </p>
 
 ---
