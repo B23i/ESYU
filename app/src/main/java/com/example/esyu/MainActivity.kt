@@ -333,13 +333,13 @@ fun HomeScreen(navController: NavHostController) {
                 }
             }
         }
-        Column {
+        /*Column {
         Text("Uygulama kullanım süreleri, cihazınızın kullanım istatistiklerine dayanmaktadır. \n" +
             "1 dakikadan az süreler dikkate alınmaz. \n" + "Uygulamaların Üzerine tıklayarak detaylarına ulaşabilirsiniz.\n" + "Bu Uygulama Muhammed Ali Kandemir ve Bilai İzzettin Tarafından geliştirilmiştir. Tüm hakları saklıdır.",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             modifier = Modifier.padding(16.dp))
-        }
+        }*/
     }
 }
 
