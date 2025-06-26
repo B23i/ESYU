@@ -49,7 +49,7 @@ EYSU, Android'in `UsageStatsManager` API’sini kullanarak uygulamaların ekran 
 
 ### 🏠 Anasayfa
 <p align="center">
-  <img src="assets/screenshots/anasayfa1.png" alt="Anasayfa" width="300"/>
+  <img src="assets/screenshots/anasayfa1.jpg" alt="Anasayfa" width="300"/>
 </p>
 
 ---
